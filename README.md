@@ -6,6 +6,26 @@ The platform converts sportsbook prices into no-vig probabilities, validates and
 
 The current version analyzes the 2021–22 season and includes an interactive Streamlit dashboard, a Louisville basketball case study, and an exploratory analysis of a single-season market anomaly.
 
+## Dashboard Preview
+
+### Market Overview
+
+![College basketball market efficiency dashboard overview](reports/screenshots/dashboard_overview.png)
+
+The dashboard summarizes SQL-powered market metrics, forecast accuracy, team performance, and automated pipeline validation.
+
+### Market Calibration
+
+![NCAA basketball market probability calibration](reports/screenshots/market_calibration.png)
+
+The calibration view compares average no-vig market probabilities with actual win rates across probability ranges.
+
+### Louisville Case Study
+
+![Louisville basketball market pricing case study](reports/screenshots/louisville_case_study.png)
+
+The Louisville case study compares actual wins with market-expected wins and tracks how pricing error developed throughout the 2021–22 season.
+
 ## Project Overview
 
 Sportsbook moneylines can be interpreted as market prices for game outcomes. Raw implied probabilities, however, include the sportsbook’s margin, or **vig**, and therefore sum to more than 100%.
