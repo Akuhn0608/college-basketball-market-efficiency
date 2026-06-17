@@ -197,11 +197,121 @@ FROM louisville_case_study
 ORDER BY game_date;
 """
 
+strategy_backtest_query = """
+SELECT
+    strategy,
+    bets,
+    wins,
+    hit_rate,
+    net_profit,
+    roi,
+    return_volatility,
+    sharpe_like_ratio,
+    maximum_drawdown
+FROM market_strategy_backtests
+ORDER BY roi DESC;
+"""
+
+
+bucket_adjustment_query = """
+SELECT
+    probability_bucket,
+    bets,
+    observed_roi,
+    clustered_ci_95_lower,
+    clustered_ci_95_upper,
+    bonferroni_ci_lower,
+    bonferroni_ci_upper,
+    probability_positive_roi,
+    adjusted_interpretation
+FROM bucket_multiple_testing_adjustment
+ORDER BY
+    CASE probability_bucket
+        WHEN '0%–10%' THEN 1
+        WHEN '10%–20%' THEN 2
+        WHEN '20%–30%' THEN 3
+        WHEN '30%–40%' THEN 4
+        WHEN '40%–50%' THEN 5
+        WHEN '50%–60%' THEN 6
+        WHEN '60%–70%' THEN 7
+        WHEN '70%–80%' THEN 8
+        WHEN '80%–90%' THEN 9
+        WHEN '90%–100%' THEN 10
+    END;
+"""
+
+
+candidate_time_query = """
+SELECT
+    segment,
+    start_date,
+    end_date,
+    bets,
+    wins,
+    hit_rate,
+    net_profit,
+    roi,
+    roi_ci_lower,
+    roi_ci_upper,
+    probability_positive_roi,
+    maximum_drawdown
+FROM candidate_edge_time_validation;
+"""
+
+
+candidate_location_query = """
+SELECT
+    location,
+    bets,
+    wins,
+    hit_rate,
+    net_profit,
+    roi,
+    roi_ci_lower,
+    roi_ci_upper,
+    probability_positive_roi,
+    maximum_drawdown
+FROM candidate_edge_location_validation;
+"""
+
+
+candidate_monthly_query = """
+SELECT
+    month,
+    bets,
+    wins,
+    hit_rate,
+    net_profit,
+    roi,
+    maximum_drawdown
+FROM candidate_edge_monthly_validation
+ORDER BY month;
+"""
 
 market_overview_df = run_sql_query(market_overview_query)
 team_rankings_df = run_sql_query(team_rankings_query)
 segment_sql_df = run_sql_query(segment_query)
 louisville_rolling_df = run_sql_query(louisville_rolling_query)
+
+strategy_backtest_df = run_sql_query(
+    strategy_backtest_query
+)
+
+bucket_adjustment_df = run_sql_query(
+    bucket_adjustment_query
+)
+
+candidate_time_df = run_sql_query(
+    candidate_time_query
+)
+
+candidate_location_df = run_sql_query(
+    candidate_location_query
+)
+
+candidate_monthly_df = run_sql_query(
+    candidate_monthly_query
+)
 
 louisville_rolling_df["game_date"] = pd.to_datetime(
     louisville_rolling_df["game_date"]
@@ -251,12 +361,18 @@ log_loss = metrics_df.loc[
 
 overview = market_overview_df.iloc[0]
 
-
-overview_tab, teams_tab, louisville_tab, quality_tab = st.tabs(
+(
+    overview_tab,
+    teams_tab,
+    louisville_tab,
+    backtest_tab,
+    quality_tab,
+) = st.tabs(
     [
         "Market Overview",
         "Team Explorer",
         "Louisville Case Study",
+        "Backtesting & Risk",
         "Data Quality",
     ]
 )
@@ -333,10 +449,15 @@ with overview_tab:
     )
 
     if calibration_chart_path.exists():
-        st.image(
-            str(calibration_chart_path),
-            use_container_width=True,
-        )
+        image_col1, image_col2, image_col3 = st.columns(
+    [1, 3, 1]
+)
+
+with image_col2:
+    st.image(
+        str(calibration_chart_path),
+        width=750,
+    )
 
     calibration_display_df = calibration_df.copy()
 
@@ -912,6 +1033,358 @@ with louisville_tab:
         hide_index=True,
     )
 
+
+with backtest_tab:
+    st.subheader("Backtesting and Risk Analysis")
+
+    st.warning(
+        "Research note: these results describe one historical season. "
+        "The analysis is exploratory and does not establish a persistent "
+        "or tradable betting edge without out-of-sample validation."
+    )
+
+    st.write(
+        "Each observation represents a hypothetical one-unit wager at "
+        "the listed closing American moneyline. ROI includes sportsbook "
+        "vig and therefore differs from probability calibration."
+    )
+
+    candidate_row = bucket_adjustment_df.loc[
+        bucket_adjustment_df["probability_bucket"] == "70%–80%"
+    ].iloc[0]
+
+    candidate_full_period = candidate_time_df.loc[
+        candidate_time_df["segment"] == "Full season"
+    ].iloc[0]
+
+    backtest_col1, backtest_col2, backtest_col3, backtest_col4 = (
+        st.columns(4)
+    )
+
+    with backtest_col1:
+        st.metric(
+            "Candidate bucket",
+            "70%–80%",
+        )
+
+    with backtest_col2:
+        st.metric(
+            "Flat-stake ROI",
+            f"{candidate_row['observed_roi'] * 100:.2f}%",
+        )
+
+    with backtest_col3:
+        st.metric(
+            "Observations",
+            f"{int(candidate_row['bets']):,}",
+        )
+
+    with backtest_col4:
+        st.metric(
+            "Maximum drawdown",
+            f"{candidate_full_period['maximum_drawdown']:.1f} units",
+        )
+
+    st.caption(
+        "The 70%–80% bucket was the only tested probability range "
+        "whose Bonferroni-adjusted confidence interval remained "
+        "entirely above zero."
+    )
+
+    st.subheader("ROI by Market Probability Bucket")
+
+    bucket_chart_df = bucket_adjustment_df.copy()
+
+    bucket_chart_df["roi_pct"] = (
+        bucket_chart_df["observed_roi"] * 100
+    )
+
+    bucket_chart_df["lower_error"] = (
+        bucket_chart_df["observed_roi"]
+        - bucket_chart_df["bonferroni_ci_lower"]
+    ) * 100
+
+    bucket_chart_df["upper_error"] = (
+        bucket_chart_df["bonferroni_ci_upper"]
+        - bucket_chart_df["observed_roi"]
+    ) * 100
+
+    bucket_roi_figure = px.bar(
+        bucket_chart_df,
+        x="probability_bucket",
+        y="roi_pct",
+        error_y="upper_error",
+        error_y_minus="lower_error",
+        title=(
+            "Flat-Stake ROI with Multiple-Testing-Adjusted "
+            "Confidence Intervals"
+        ),
+        labels={
+            "probability_bucket": "No-vig probability bucket",
+            "roi_pct": "ROI (%)",
+        },
+    )
+
+    bucket_roi_figure.add_hline(
+        y=0,
+        line_dash="dash",
+    )
+
+    st.plotly_chart(
+        bucket_roi_figure,
+        use_container_width=True,
+    )
+
+    bucket_display_df = bucket_adjustment_df.copy()
+
+    percentage_columns = [
+        "observed_roi",
+        "clustered_ci_95_lower",
+        "clustered_ci_95_upper",
+        "bonferroni_ci_lower",
+        "bonferroni_ci_upper",
+        "probability_positive_roi",
+    ]
+
+    for column in percentage_columns:
+        bucket_display_df[column] = (
+            bucket_display_df[column] * 100
+        ).round(2)
+
+    bucket_display_df = bucket_display_df.rename(
+        columns={
+            "probability_bucket": "Probability bucket",
+            "bets": "Observations",
+            "observed_roi": "Observed ROI (%)",
+            "clustered_ci_95_lower": "Clustered 95% lower (%)",
+            "clustered_ci_95_upper": "Clustered 95% upper (%)",
+            "bonferroni_ci_lower": "Adjusted lower (%)",
+            "bonferroni_ci_upper": "Adjusted upper (%)",
+            "probability_positive_roi": (
+                "Bootstrap samples above zero (%)"
+            ),
+            "adjusted_interpretation": "Interpretation",
+        }
+    )
+
+    st.dataframe(
+        bucket_display_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("Broad Strategy Performance")
+
+    strategy_chart_df = strategy_backtest_df.copy()
+
+    strategy_chart_df["roi_pct"] = (
+        strategy_chart_df["roi"] * 100
+    )
+
+    strategy_chart_df = strategy_chart_df.sort_values(
+        "roi_pct"
+    )
+
+    strategy_roi_figure = px.bar(
+        strategy_chart_df,
+        x="roi_pct",
+        y="strategy",
+        orientation="h",
+        title="Flat-Stake ROI by Broad Market Strategy",
+        labels={
+            "roi_pct": "ROI (%)",
+            "strategy": "Strategy",
+        },
+    )
+
+    strategy_roi_figure.add_vline(
+        x=0,
+        line_dash="dash",
+    )
+
+    st.plotly_chart(
+        strategy_roi_figure,
+        use_container_width=True,
+    )
+
+    strategy_display_df = strategy_backtest_df.copy()
+
+    strategy_display_df["hit_rate"] = (
+        strategy_display_df["hit_rate"] * 100
+    ).round(2)
+
+    strategy_display_df["roi"] = (
+        strategy_display_df["roi"] * 100
+    ).round(2)
+
+    strategy_display_df["return_volatility"] = (
+        strategy_display_df["return_volatility"] * 100
+    ).round(2)
+
+    strategy_display_df["net_profit"] = (
+        strategy_display_df["net_profit"].round(2)
+    )
+
+    strategy_display_df["maximum_drawdown"] = (
+        strategy_display_df["maximum_drawdown"].round(2)
+    )
+
+    strategy_display_df = strategy_display_df.rename(
+        columns={
+            "strategy": "Strategy",
+            "bets": "Bets",
+            "wins": "Wins",
+            "hit_rate": "Hit rate (%)",
+            "net_profit": "Net profit (units)",
+            "roi": "ROI (%)",
+            "return_volatility": "Return volatility (%)",
+            "sharpe_like_ratio": "Sharpe-like ratio",
+            "maximum_drawdown": "Maximum drawdown (units)",
+        }
+    )
+
+    st.dataframe(
+        strategy_display_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("Candidate Edge Robustness")
+
+    time_col, location_col = st.columns(2)
+
+    time_display_df = candidate_time_df.copy()
+
+    for column in [
+        "hit_rate",
+        "roi",
+        "roi_ci_lower",
+        "roi_ci_upper",
+        "probability_positive_roi",
+    ]:
+        time_display_df[column] = (
+            time_display_df[column] * 100
+        ).round(2)
+
+    time_display_df["net_profit"] = (
+        time_display_df["net_profit"].round(2)
+    )
+
+    time_display_df["maximum_drawdown"] = (
+        time_display_df["maximum_drawdown"].round(2)
+    )
+
+    time_display_df = time_display_df.rename(
+        columns={
+            "segment": "Period",
+            "start_date": "Start date",
+            "end_date": "End date",
+            "bets": "Bets",
+            "wins": "Wins",
+            "hit_rate": "Hit rate (%)",
+            "net_profit": "Net profit",
+            "roi": "ROI (%)",
+            "roi_ci_lower": "95% lower (%)",
+            "roi_ci_upper": "95% upper (%)",
+            "probability_positive_roi": (
+                "Bootstrap positive (%)"
+            ),
+            "maximum_drawdown": "Maximum drawdown",
+        }
+    )
+
+    with time_col:
+        st.write("**Chronological validation**")
+
+        st.dataframe(
+            time_display_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    location_display_df = candidate_location_df.copy()
+
+    for column in [
+        "hit_rate",
+        "roi",
+        "roi_ci_lower",
+        "roi_ci_upper",
+        "probability_positive_roi",
+    ]:
+        location_display_df[column] = (
+            location_display_df[column] * 100
+        ).round(2)
+
+    location_display_df["net_profit"] = (
+        location_display_df["net_profit"].round(2)
+    )
+
+    location_display_df["maximum_drawdown"] = (
+        location_display_df["maximum_drawdown"].round(2)
+    )
+
+    location_display_df = location_display_df.rename(
+        columns={
+            "location": "Location",
+            "bets": "Bets",
+            "wins": "Wins",
+            "hit_rate": "Hit rate (%)",
+            "net_profit": "Net profit",
+            "roi": "ROI (%)",
+            "roi_ci_lower": "95% lower (%)",
+            "roi_ci_upper": "95% upper (%)",
+            "probability_positive_roi": (
+                "Bootstrap positive (%)"
+            ),
+            "maximum_drawdown": "Maximum drawdown",
+        }
+    )
+
+    with location_col:
+        st.write("**Home and visitor validation**")
+
+        st.dataframe(
+            location_display_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.subheader("Monthly Stability of the 70%–80% Bucket")
+
+    monthly_chart_df = candidate_monthly_df.copy()
+
+    monthly_chart_df["roi_pct"] = (
+        monthly_chart_df["roi"] * 100
+    )
+
+    monthly_roi_figure = px.bar(
+        monthly_chart_df,
+        x="month",
+        y="roi_pct",
+        title="Monthly Flat-Stake ROI",
+        labels={
+            "month": "Month",
+            "roi_pct": "ROI (%)",
+        },
+    )
+
+    monthly_roi_figure.add_hline(
+        y=0,
+        line_dash="dash",
+    )
+
+    st.plotly_chart(
+        monthly_roi_figure,
+        use_container_width=True,
+    )
+
+    st.info(
+        "Interpretation: the candidate bucket was positive in four "
+        "of five monthly periods and remained positive after clustered "
+        "bootstrap and multiple-testing adjustment. It should still be "
+        "treated as a single-season anomaly until another season can be "
+        "used for true out-of-sample validation."
+    )
 
 with quality_tab:
     st.subheader("Automated Data-Quality Monitoring")
