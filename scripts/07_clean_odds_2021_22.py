@@ -108,6 +108,36 @@ games_df["home_win"] = (
     games_df["home_score"] > games_df["visitor_score"]
 ).astype(int)
 
+# NCAA basketball games cannot end in a tie.
+# Flag source records whose reported final scores are equal.
+games_df["valid_final_score"] = (
+    games_df["visitor_score"] != games_df["home_score"]
+)
+
+invalid_score_games = games_df[
+    ~games_df["valid_final_score"]
+].copy()
+
+if not invalid_score_games.empty:
+    print()
+    print("Invalid tied final-score records found:")
+    print(
+        invalid_score_games[
+            [
+                "game_date",
+                "visitor_team",
+                "home_team",
+                "visitor_score",
+                "home_score",
+            ]
+        ].to_string(index=False)
+    )
+
+# Exclude invalid tied records from downstream analysis.
+games_df = games_df[
+    games_df["valid_final_score"]
+].copy()
+
 games_df["moneylines_available"] = (
     games_df["visitor_moneyline"].notna()
     & games_df["home_moneyline"].notna()

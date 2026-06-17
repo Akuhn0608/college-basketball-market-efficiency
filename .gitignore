@@ -3,4 +3,9 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 data/raw/
+data/processed/data/database/
+
+# Generated datasets and databases
+data/raw/
 data/processed/
+data/database/
